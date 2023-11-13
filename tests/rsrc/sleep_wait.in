@@ -1,0 +1,6 @@
+run echo hello world
+run sleep 1
+cont 1
+cont 0
+wait 1
+quit
