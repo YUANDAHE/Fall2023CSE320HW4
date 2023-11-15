@@ -34,6 +34,8 @@ enum {
     CMD_NONE,
 };
 
+#define JOB_SLEEP_NSEC  10000000
+
 int g_job_id = 0;
 struct job {
     int id, pid;
@@ -234,7 +236,7 @@ static void quit_system(void)
         //test error, so must wait a time,to quit
         struct timespec stime;
         stime.tv_sec = 0;
-        stime.tv_nsec = 100000;
+        stime.tv_nsec = JOB_SLEEP_NSEC;
         nanosleep(&stime, NULL);
     }
     
@@ -363,6 +365,22 @@ struct job *find_pid_job(int pid)
     return NULL;
 }
 
+static void run_check_job_ptraced(void)
+{
+    sigset_t mask;
+    sigemptyset(&mask);
+
+    struct job *job = job_head;
+    while (job) 
+    {
+        while (job->ptrace_stopped == 0) 
+        {
+            sigsuspend(&mask);
+        }
+        
+        job = job->next;
+    }
+}
 
 void run_job(char *str)
 {
@@ -374,6 +392,9 @@ void run_job(char *str)
     }
     
     memset(job, 0x00, sizeof(struct job));
+
+    run_check_job_ptraced();
+    
     //parse job argc/argv
     char *token = strtok(str, " ");
     while (token) 
@@ -387,10 +408,10 @@ void run_job(char *str)
     pid = fork();
     if (pid == 0) 
     {
-        //test find ,must parent running
+        //test find ,must parent running print running
         struct timespec stime;
         stime.tv_sec = 0;
-        stime.tv_nsec = 100000;
+        stime.tv_nsec = JOB_SLEEP_NSEC;
         nanosleep(&stime, NULL);
 
         //dup out --> err
@@ -421,7 +442,7 @@ void run_job(char *str)
     
     job_add(job);
     job_print_state_msg(job, PSTATE_RUNNING, 1);
-        
+
     return;
 }
 
@@ -764,9 +785,11 @@ static void do_child_status_print(pid_t pid, int status)
 
     if (WIFSTOPPED(status)) {
 		//ret = WSTOPSIG(status);
-        job_print_state_msg(job, PSTATE_STOPPED, 1);
         if (job->ptrace_stopped == 0) {
             job->ptrace_stopped = 1;
+            job_print_state_msg(job, PSTATE_STOPPED, 1);
+        } else {
+            job_print_state_msg(job, PSTATE_STOPPED, 1);
         }
         return;
 	}
