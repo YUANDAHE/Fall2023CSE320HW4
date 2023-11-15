@@ -387,6 +387,12 @@ void run_job(char *str)
     pid = fork();
     if (pid == 0) 
     {
+        //test find ,must parent running
+        struct timespec stime;
+        stime.tv_sec = 0;
+        stime.tv_nsec = 1000;
+        nanosleep(&stime, NULL);
+
         //dup out --> err
         dup2(STDERR_FILENO, STDOUT_FILENO);
         //to TRACEME
