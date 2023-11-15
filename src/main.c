@@ -390,7 +390,7 @@ void run_job(char *str)
         //test find ,must parent running
         struct timespec stime;
         stime.tv_sec = 0;
-        stime.tv_nsec = 1000;
+        stime.tv_nsec = 100000;
         nanosleep(&stime, NULL);
 
         //dup out --> err
