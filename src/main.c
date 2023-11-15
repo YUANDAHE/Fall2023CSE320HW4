@@ -222,7 +222,7 @@ static void quit_system(void)
     struct job *job = job_head;
     while (job) 
     {
-        if (job->state == PSTATE_RUNNING) 
+        if (job->state != PSTATE_DEAD) 
         {
             log_state_change(job->pid, job->state, PSTATE_KILLED, job->status);
             job->state = PSTATE_KILLED;
