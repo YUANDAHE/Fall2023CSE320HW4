@@ -184,6 +184,7 @@ char *psrse_cmd(char *line, int *cmd)
         str += 2;
         *cmd = CMD_BT;
     } else {
+        log_error(str);
         printf("?\n");
         *cmd = CMD_NONE;
         return NULL;
@@ -408,7 +409,7 @@ void run_job(char *str)
     pid = fork();
     if (pid == 0) 
     {
-        //test find ,must parent running print running
+        //test find ,must parent running print running state
         struct timespec stime;
         stime.tv_sec = 0;
         stime.tv_nsec = JOB_SLEEP_NSEC;
@@ -487,9 +488,8 @@ static void cont_job(char *str)
     if (job->ptraced) 
     {
         //ptrace cont
-        ptrace(PTRACE_CONT, job->pid, NULL, NULL, NULL);
-        
         job_print_state_msg(job, PSTATE_RUNNING, 1);
+        ptrace(PTRACE_CONT, job->pid, NULL, NULL, NULL);
     } 
     else 
     {
@@ -522,9 +522,8 @@ static void release_job(char *str)
     job->state = PSTATE_CONTINUING;
     if (job->ptraced) {
         //ptrace detach
-        ptrace(PTRACE_DETACH, job->pid, NULL, NULL, NULL);
-
         job_print_state_msg(job, PSTATE_RUNNING, 1);
+        ptrace(PTRACE_DETACH, job->pid, NULL, NULL, NULL);
     } else {
         kill(job->pid, SIGCONT);
     }
