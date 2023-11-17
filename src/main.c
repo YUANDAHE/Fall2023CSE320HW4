@@ -18,6 +18,8 @@
 #include "debug.h"
 #include <time.h> //nansosleep
 
+static void log_print_line(int cmd, char *str);
+
 enum {
     CMD_HELP,
     CMD_QUIT,
@@ -177,6 +179,7 @@ char *psrse_cmd(char *line, int *cmd)
         str += 2;
         *cmd = CMD_BT;
     } else {
+        log_print_line(CMD_NONE, str);
         log_error(str);
         printf("?\n");
         *cmd = CMD_NONE;
@@ -233,10 +236,14 @@ static void log_print_line(int cmd, char *str)
 {
     char buf[256];
     int count = 0;
-    
-    count += snprintf(buf + count, 256 - count, "%s", job_cmd2string(cmd));
+
+    if (cmd != CMD_NONE) {
+        count += snprintf(buf + count, 256 - count, "%s", 
+            job_cmd2string(cmd));
+    }
     if (str) {
-        count += snprintf(buf + count, 256 - count, " %s\n", str);
+        count += snprintf(buf + count, 256 - count, "%s%s\n", 
+            count > 0? " ": "", str);
     } else {
         count += snprintf(buf + count, 256 - count, "\n");
     }
@@ -936,6 +943,8 @@ int main(int argc, char *argv[])
         }
         if (readlen == 0) 
         {
+            log_print_line(CMD_NONE, NULL);
+            log_prompt();
             continue;
         }
 
@@ -1000,6 +1009,7 @@ int main(int argc, char *argv[])
 
             case CMD_NONE:
             default:
+                log_prompt();
                 break;
         }
 
