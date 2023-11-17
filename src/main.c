@@ -75,7 +75,6 @@ int my_get_a_line(int argc, char *argv[], char **line, size_t *line_len)
         prompt = 0;
     }
 
-    log_prompt();
     if (prompt) 
     {
         printf("deet> ");
@@ -85,15 +84,9 @@ int my_get_a_line(int argc, char *argv[], char **line, size_t *line_len)
     int len = getline(line, line_len, stdin);
     if (len == -1) 
     {
-        if (errno == EINTR) 
-        {
-            return 0;
-        }
-        
         return -1;
     }
     char *str = *line;
-    log_input(str);
 
     if (len > 0 && str[len - 1] == '\n') 
     {
@@ -216,9 +209,61 @@ static void help_msg(void)
     return;
 }
 
+static char *job_cmd2string(int cmd)
+{
+    switch (cmd) 
+    {
+        case CMD_HELP:      return "help";
+        case CMD_QUIT:      return "quit";
+        case CMD_SHOW:      return "show";
+        case CMD_RUN:       return "run";
+        case CMD_STOP:      return "killed";
+        case CMD_CONT:       return "cont";
+        case CMD_RELEASE:    return "release";
+        case CMD_WAIT:       return "wait";
+        case CMD_KILL:       return "kill";
+        case CMD_PEEK:       return "peek";
+        case CMD_POKE:       return "poke";
+        case CMD_BT:         return "bt";
+        default:             return "none";
+    }
+}
+
+static void log_print_line(int cmd, char *str)
+{
+    char buf[256];
+    int count = 0;
+    
+    count += snprintf(buf + count, 256 - count, "%s", job_cmd2string(cmd));
+    if (str) {
+        count += snprintf(buf + count, 256 - count, " %s\n", str);
+    } else {
+        count += snprintf(buf + count, 256 - count, "\n");
+    }
+    log_input(buf);
+}
+
+static void wait_time(long time)
+{
+    //wait running over
+    struct timespec stime;
+    stime.tv_sec = 0;
+    stime.tv_nsec = time;
+    nanosleep(&stime, NULL);
+}
+
+static void wait_signal(void)
+{
+    sigset_t mask;
+    sigemptyset(&mask);
+    //to wait, sleep by sigsuspend
+    sigsuspend(&mask);
+}
+
 static void quit_system(void)
 {
-    int killed = 0;
+    log_print_line(CMD_QUIT, NULL);
+    
     struct job *job = job_head;
     while (job) 
     {
@@ -227,20 +272,14 @@ static void quit_system(void)
             log_state_change(job->pid, job->state, PSTATE_KILLED, job->status);
             job->state = PSTATE_KILLED;
             kill(job->pid, SIGKILL);
-            killed++;
         }
 
         job = job->next;
     }
 
-    if (killed) {
-        //test error, so must wait a time,to quit
-        struct timespec stime;
-        stime.tv_sec = 0;
-        stime.tv_nsec = JOB_SLEEP_NSEC;
-        nanosleep(&stime, NULL);
-    }
-    
+    //wait running over
+    wait_time(JOB_SLEEP_NSEC);
+
     return;
 }
 
@@ -326,6 +365,8 @@ static void job_print_state_msg(struct job *job, PSTATE new_state, int log)
 static void show_job(void)
 {
     struct job *job = job_head;
+
+    log_print_line(CMD_SHOW, NULL);
     
     while (job) 
     {
@@ -395,6 +436,7 @@ void run_job(char *str)
     memset(job, 0x00, sizeof(struct job));
 
     run_check_job_ptraced();
+    log_print_line(CMD_RUN, str);
     
     //parse job argc/argv
     char *token = strtok(str, " ");
@@ -410,10 +452,7 @@ void run_job(char *str)
     if (pid == 0) 
     {
         //test find ,must parent running print running state
-        struct timespec stime;
-        stime.tv_sec = 0;
-        stime.tv_nsec = JOB_SLEEP_NSEC;
-        nanosleep(&stime, NULL);
+        wait_time(JOB_SLEEP_NSEC);
 
         //dup out --> err
         dup2(STDERR_FILENO, STDOUT_FILENO);
@@ -426,10 +465,13 @@ void run_job(char *str)
         {
             //2: local path
             snprintf(execv_path, 128, "./%s", job->argv[0]);
+            free(job->argv[0]);
+            job->argv[0] = strdup(execv_path);
             if (execv(execv_path, job->argv) == -1) 
             {
-                log_error("execv error\n");
-       		    exit(-1);
+                snprintf(execv_path, 128, "%s execv error\n", job->argv[0]);
+                log_error(execv_path);
+                exit(-1);
             }
        	}
         
@@ -452,6 +494,8 @@ static void stop_job(char *str)
     int jid = atoi(str);
 	struct job *job;
 
+    log_print_line(CMD_STOP, str);
+    
 	job = find_job(jid);
 	if (job == NULL) 
     {
@@ -470,6 +514,8 @@ static void cont_job(char *str)
     int jid = atoi(str);
 	struct job *job;
 
+    log_print_line(CMD_CONT, str);
+    
 	job = find_job(jid);
 	if (job == NULL) 
     {
@@ -489,13 +535,20 @@ static void cont_job(char *str)
     {
         //ptrace cont
         job_print_state_msg(job, PSTATE_RUNNING, 1);
+        log_prompt();
         ptrace(PTRACE_CONT, job->pid, NULL, NULL, NULL);
     } 
     else 
     {
+        job_print_state_msg(job, PSTATE_RUNNING, 1);
+        log_prompt();
         kill(job->pid, SIGCONT);
     }
 
+    //wait child to running
+    wait_time(JOB_SLEEP_NSEC);
+    //wait_signal();
+    
     return;
 }
 
@@ -504,6 +557,8 @@ static void release_job(char *str)
     int jid = atoi(str);
 	struct job *job;
 
+    log_print_line(CMD_RELEASE, str);
+    
 	job = find_job(jid);
 	if (job == NULL) 
     {
@@ -519,12 +574,16 @@ static void release_job(char *str)
         sigsuspend(&mask);
     }
 
-    job->state = PSTATE_CONTINUING;
+    //job->state = PSTATE_CONTINUING;
     if (job->ptraced) {
         //ptrace detach
         job_print_state_msg(job, PSTATE_RUNNING, 1);
+        log_prompt();
+
         ptrace(PTRACE_DETACH, job->pid, NULL, NULL, NULL);
     } else {
+        job_print_state_msg(job, PSTATE_RUNNING, 1);
+        log_prompt();
         kill(job->pid, SIGCONT);
     }
 
@@ -539,6 +598,8 @@ static void wait_job(char *str)
     int jid, index;
 	struct job *job;
     PSTATE wait_state = PSTATE_DEAD;
+
+    log_print_line(CMD_WAIT, str);
     
     index = 0;
     char *token = strtok(str, " ");
@@ -601,6 +662,8 @@ static void kill_job(char *str)
     int jid = atoi(str);
 	struct job *job;
 
+    log_print_line(CMD_KILL, str);
+    
 	job = find_job(jid);
 	if (job == NULL) 
     {
@@ -614,6 +677,7 @@ static void kill_job(char *str)
     }
 
     job_print_state_msg(job, PSTATE_KILLED, 1);
+    log_prompt();
     
     kill(job->pid, SIGKILL);
 
@@ -627,6 +691,8 @@ static void peek_job(char *str)
     int index = 0;
     unsigned long addr = 0;
     unsigned long data = 0;
+
+    log_print_line(CMD_PEEK, str);
     
     char *token = strtok(str, " ");
     while (token) {
@@ -669,6 +735,8 @@ static void poke_job(char *str)
     int index = 0;
     unsigned long mm_addr = 0;
     unsigned long mm_data = 0;
+
+    log_print_line(CMD_POKE, str);
     
     char *token = strtok(str, " ");
     while (token) {
@@ -714,6 +782,8 @@ static void bt_job(char *str)
     unsigned long *rbp_addr;
     long ptrace_ret;
 
+    log_print_line(CMD_BT, str);
+    
 	job = find_job(jid);
 	if (job == NULL) 
     {
@@ -772,37 +842,42 @@ static void do_child_status_print(pid_t pid, int status)
 	job = find_pid_job(pid);
 	if (job == NULL) 
     {
+        log_error("waitpid not find pid job\n");
 		return;
 	}
 
-	if (WIFEXITED(status)) {
+	if (WIFEXITED(status)) 
+    {
 		ret = WEXITSTATUS(status);
         job->status = ret;
         job_print_state_msg(job, PSTATE_DEAD, 1);
         return;
 	} 
-
-    if (WIFSTOPPED(status)) {
-		//ret = WSTOPSIG(status);
-        if (job->ptrace_stopped == 0) {
-            job->ptrace_stopped = 1;
-            job_print_state_msg(job, PSTATE_STOPPED, 1);
-        } else {
-            job_print_state_msg(job, PSTATE_STOPPED, 1);
-        }
-        return;
-	}
-
-    if (WIFCONTINUED(status)) {
-        job_print_state_msg(job, PSTATE_RUNNING, 1);
-	}
-
-    if (WIFSIGNALED(status)) 
+    else if (WIFSIGNALED(status)) 
     {
         job->status = 0;
 		//ret = WTERMSIG(status);
         log_state_change(job->pid, job->state, PSTATE_DEAD, job->status);
 		job->state = PSTATE_DEAD;
+        return;
+	} 
+    else if (WIFSTOPPED(status)) 
+    {
+		//ret = WSTOPSIG(status);
+        if (job->ptrace_stopped == 0) 
+        {
+            job->ptrace_stopped = 1;
+            job_print_state_msg(job, PSTATE_STOPPED, 1);
+        } 
+        else 
+        {
+            job_print_state_msg(job, PSTATE_STOPPED, 1);
+        }
+        return;
+	} 
+    else if (WIFCONTINUED(status)) 
+    {
+        job_print_state_msg(job, PSTATE_RUNNING, 1);
         return;
 	}
 
@@ -850,6 +925,7 @@ int main(int argc, char *argv[])
     sigaction(SIGINT, &sa, NULL);
 
     log_startup();
+    log_prompt();
     
     while (1) 
     {
@@ -868,6 +944,7 @@ int main(int argc, char *argv[])
         switch (cmd) {
             case CMD_HELP:
                 help_msg();
+                log_prompt();
                 break;
 
             case CMD_QUIT:
@@ -876,14 +953,17 @@ int main(int argc, char *argv[])
 
             case CMD_SHOW:
                 show_job();
+                log_prompt();
                 break;
 
             case CMD_RUN:
                 run_job(str);
+                log_prompt();
                 break;
 
             case CMD_STOP:
                 stop_job(str);
+                log_prompt();
                 break;
 
             case CMD_CONT:
@@ -896,6 +976,7 @@ int main(int argc, char *argv[])
 
             case CMD_WAIT:
                 wait_job(str);
+                log_prompt();
                 break;
 
             case CMD_KILL:
@@ -904,14 +985,17 @@ int main(int argc, char *argv[])
 
             case CMD_PEEK:
                 peek_job(str);
+                log_prompt();
                 break;
 
             case CMD_POKE:
                 poke_job(str);
+                log_prompt();
                 break;
 
             case CMD_BT:
                 bt_job(str);
+                log_prompt();
                 break;
 
             case CMD_NONE:
